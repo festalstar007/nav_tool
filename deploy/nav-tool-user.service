@@ -1,0 +1,17 @@
+[Unit]
+Description=Nav Tool personal bookmark navigation
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fstar/project/nav_tool
+ExecStart=/home/fstar/project/nav_tool/bin/navtool
+Environment=NAV_ADDR=127.0.0.1:31506
+Environment=NAV_ORIGIN=https://nav.345001.xyz
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

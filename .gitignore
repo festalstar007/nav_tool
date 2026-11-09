@@ -1,0 +1,35 @@
+# Private runtime data, archives and credentials
+/data/
+/backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.tar.gz
+setup-token
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Private browser exports (keep synthetic test fixtures under web/tests)
+/docs/*.html
+/docs/*.htm
+
+# Build output and dependencies
+/bin/
+node_modules/
+/web/dist/
+*.test
+*.tsbuildinfo
+
+# Test output, caches and logs
+/web/test-results/
+/web/playwright-report/
+/web/coverage/
+coverage.out
+.cache/
+*.log
+.DS_Store

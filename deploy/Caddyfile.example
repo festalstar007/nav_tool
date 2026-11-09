@@ -1,0 +1,4 @@
+# Existing Caddy route supplied by the user; no change required.
+nav.345001.xyz {
+    reverse_proxy localhost:31506
+}
