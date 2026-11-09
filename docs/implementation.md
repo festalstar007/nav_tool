@@ -9,7 +9,7 @@
 - 工程数据：`/home/fstar/project/nav_tool/data`。
 - 用户确认已可通过本地浏览器打开页面。
 
-通过 `systemctl --user status nav-tool.service` 查看运行状态，日志使用 `journalctl --user -u nav-tool.service`。当前用户未启用 linger；已启用的用户服务随用户管理器运行。需要无人登录时开机运行，可后续由管理员安装工程提供的系统服务，或启用 linger。
+通过 `systemctl --user status nav-tool.service` 查看运行状态，日志使用 `journalctl --user -u nav-tool.service`。用户已启用 linger，实测 `Linger=yes`；服务为 `enabled` 且处于 `active/running`，具备开机且无人登录时运行的配置。本机页面检查返回 HTTP 200，尚未通过实际重启 VPS 验证启动过程。
 
 ## 首次使用
 

@@ -15,7 +15,7 @@
 - 样式：普通 CSS，使用 CSS Grid 实现紧凑书签布局。
 - 前端状态：优先使用 React 自带状态管理，确有需要时再增加依赖。
 - 数据存储：SQLite 保存书签、分类及应用设置，图标单独存放在数据目录中，不存入数据库。
-- 部署：Go 提供 API 和构建后的静态前端；Caddy 负责对外 HTTPS 与反向代理。可使用 systemd 或单个 Docker 容器运行。
+- 部署：Go 提供 API 和构建后的静态前端；Caddy 负责对外 HTTPS 与反向代理。本机已采用 `fstar` 的 systemd 用户服务 `nav-tool.service`，已启用自启动和 linger。维护时使用 `systemctl --user`，不另行安装系统级服务或启动同端口容器。
 - 构建：可在开发机编译 Go 和构建前端后部署，生产 VPS 无需常驻 Node.js 或开发服务器。
 
 ## 开发约定

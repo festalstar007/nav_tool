@@ -83,7 +83,35 @@ cat /home/fstar/project/nav_tool/data/setup-token
 | `NAV_WEB_DIR` | `web/dist` | 前端构建目录 |
 | `NAV_ORIGIN` | 空 | 正式访问来源，生产设置为 `https://nav.345001.xyz`，同时启用 Secure Cookie |
 
-宿主机部署示例见 `deploy/nav-tool.service`。首次安装时创建 `data/` 并保证运行用户可写，再由管理员安装、启用服务；示例按当前 `/home/fstar/project/nav_tool` 路径和 `fstar` 用户编写。`deploy/nav-tool-user.service` 可作为无需 root 的用户服务使用；持续开机运行需检查该用户是否启用了 linger。
+当前采用 **systemd 用户服务**，使用 `deploy/nav-tool-user.service`，路径和运行用户按本机 `fstar` 配置。重新部署时，在完成构建后以 `fstar` 执行：
+
+```sh
+cd /home/fstar/project/nav_tool
+mkdir -p data ~/.config/systemd/user
+cp deploy/nav-tool-user.service ~/.config/systemd/user/nav-tool.service
+systemctl --user daemon-reload
+systemctl --user enable --now nav-tool.service
+```
+
+本机服务已安装并启用，`fstar` 的 linger 也已开启，无需重复设置。新主机要让用户服务在开机且无人登录时运行，需要执行一次以下命令（sudo 会提示输入密码）：
+
+```sh
+sudo loginctl enable-linger fstar
+loginctl show-user fstar -p Linger
+systemctl --user is-enabled nav-tool.service
+```
+
+预期分别显示 `Linger=yes` 和 `enabled`。这仍是用户级服务，无需改成系统级服务或重启 VPS。已验证当前配置和访问正常，尚未实际重启 VPS 验证。
+
+日常管理以 `fstar` 执行，不加 sudo：
+
+```sh
+systemctl --user status nav-tool.service
+systemctl --user restart nav-tool.service
+journalctl --user -u nav-tool.service -n 50 --no-pager
+```
+
+更新 Go 可执行文件后重启服务；仅更新前端静态文件无需重启。`deploy/nav-tool.service` 是备用的系统级服务示例，本机未采用；不要同时启用两份服务占用同一端口。
 
 Docker 部署可使用 `docker compose up -d --build`，配置以非 root 运行、删除 capabilities、只读根文件系统，端口仅绑定 `127.0.0.1:31506`。数据使用命名卷；不挂载 Docker socket。弱 VPS 推荐在开发机完成构建。Docker 镜像构建需要网络，本地不代表已经验证镜像构建。
 
