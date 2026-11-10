@@ -439,7 +439,7 @@ func (a *App) frontend(w http.ResponseWriter, r *http.Request) {
 	if path == "/" {
 		path = "/index.html"
 	}
-	if path != "/index.html" && !strings.HasPrefix(path, "/assets/") {
+	if path != "/index.html" && path != "/favicon.ico" && !strings.HasPrefix(path, "/assets/") {
 		http.NotFound(w, r)
 		return
 	}

@@ -152,3 +152,59 @@ test.describe.serial("navigation workflow", () => {
     await expect(page.getByRole("heading", { name: "登录" })).toBeVisible();
   });
 });
+
+test("large collections render in batches and search includes unloaded bookmarks", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/auth/status", (route) =>
+    route.fulfill({
+      json: { initialized: true, authenticated: true },
+    }),
+  );
+  await page.route("**/api/data", (route) =>
+    route.fulfill({
+      json: {
+        categories: [
+          { id: "parent", parent_id: "", name: "上级分类", sort_order: 0 },
+          { id: "child", parent_id: "parent", name: "大量书签", sort_order: 0 },
+        ],
+        bookmarks: Array.from({ length: 240 }, (_, i) => ({
+          id: `bookmark-${i}`,
+          category_id: "child",
+          name: `书签 ${i}`,
+          url: `https://example.com/${i}`,
+          note: "",
+          icon: "",
+          sort_order: i,
+        })),
+      },
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator(".bookmark-link")).toHaveCount(80);
+  await page.getByRole("button", { name: "打开分类" }).click();
+  await expect(
+    page
+      .locator(".category-row")
+      .filter({ hasText: "上级分类" })
+      .locator(".count"),
+  ).toHaveText("240");
+  await expect(
+    page
+      .locator(".category-row")
+      .filter({ hasText: "大量书签" })
+      .locator(".count"),
+  ).toHaveText("240");
+  await page.getByRole("button", { name: "关闭分类" }).click();
+  await page.getByRole("textbox", { name: "搜索书签" }).fill("书签 239");
+  await expect(page.locator(".bookmark-link")).toHaveCount(1);
+  await expect(page.locator(".bookmark-link")).toContainText("书签 239");
+  await page.getByRole("button", { name: "清空搜索" }).click();
+  await expect(page.locator(".bookmark-link")).toHaveCount(80);
+  await page.locator(".load-more").scrollIntoViewIfNeeded();
+  await expect(page.locator(".bookmark-link")).toHaveCount(160);
+  await page.locator(".load-more").scrollIntoViewIfNeeded();
+  await expect(page.locator(".bookmark-link")).toHaveCount(240);
+  await expect(page.locator(".load-more")).toHaveCount(0);
+});

@@ -358,6 +358,10 @@ button svg {
   font-size: 11px;
   margin-top: 8px;
 }
+.load-more {
+  display: block;
+  margin: 12px auto 28px;
+}
 .bookmark-section {
   margin-bottom: 29px;
 }

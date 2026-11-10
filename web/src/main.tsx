@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   DndContext,
@@ -170,7 +170,19 @@ function Modal({
     </dialog>
   );
 }
-function Sortable({
+type SortableProps = {
+  id: string;
+  disabled: boolean;
+  children: (handle: React.ReactNode) => React.ReactNode;
+};
+function Sortable(props: SortableProps) {
+  return props.disabled ? (
+    <div className="sortable">{props.children(null)}</div>
+  ) : (
+    <ActiveSortable {...props} />
+  );
+}
+function ActiveSortable({
   id,
   disabled,
   children,
@@ -213,7 +225,20 @@ function Sortable({
     </div>
   );
 }
-function SortGroup({
+type SortGroupProps = {
+  items: string[];
+  disabled: boolean;
+  onSort: (ids: string[]) => void;
+  children: React.ReactNode;
+};
+function SortGroup(props: SortGroupProps) {
+  return props.disabled ? (
+    <>{props.children}</>
+  ) : (
+    <ActiveSortGroup {...props} />
+  );
+}
+function ActiveSortGroup({
   items,
   disabled,
   onSort,
@@ -259,6 +284,9 @@ function Icon({ b }: { b: Bookmark }) {
       alt=""
       onError={() => setBroken(true)}
       loading="lazy"
+      decoding="async"
+      width={20}
+      height={20}
     />
   ) : (
     <span className="site-fallback">{b.name.slice(0, 1).toUpperCase()}</span>
@@ -277,6 +305,24 @@ function App() {
   const [sideOpen, setSideOpen] = useState(false);
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
+  const [renderLimit, setRenderLimit] = useState(80);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  // Count each bookmark once along its ancestor chain, rather than rebuilding
+  // every category subtree separately for every bookmark on every render.
+  const categoryCounts = useMemo(() => {
+    const byId = new Map(data.categories.map((c) => [c.id, c]));
+    const counts = new Map<string, number>();
+    for (const b of data.bookmarks) {
+      let id = b.category_id;
+      const seen = new Set<string>();
+      while (id && !seen.has(id)) {
+        seen.add(id);
+        counts.set(id, (counts.get(id) || 0) + 1);
+        id = byId.get(id)?.parent_id || "";
+      }
+    }
+    return counts;
+  }, [data.categories, data.bookmarks]);
   const message = (e: unknown) =>
     setNotice(e instanceof Error ? e.message : String(e));
   async function load() {
@@ -388,6 +434,29 @@ function App() {
     );
   }
   flatten();
+  const orderedVisible = flatCategories.flatMap((c) =>
+    ordered(visible.filter((b) => b.category_id === c.id)),
+  );
+  const displayed = edit
+    ? orderedVisible
+    : orderedVisible.slice(0, renderLimit);
+  const hasMore = !edit && displayed.length < orderedVisible.length;
+  useEffect(() => setRenderLimit(80), [selected, query]);
+  useEffect(() => {
+    const target = moreRef.current;
+    if (!target || !hasMore || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          setRenderLimit((limit) => limit + 80);
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, renderLimit, selected, query, loading, edit]);
   const choose = (id: string) => {
     setSelected(id);
     setSearch("");
@@ -411,9 +480,7 @@ function App() {
       >
         {items.map((c) => {
           const hasChild = data.categories.some((v) => v.parent_id === c.id);
-          const count = data.bookmarks.filter((b) =>
-            descendants(c.id).has(b.category_id),
-          ).length;
+          const count = categoryCounts.get(c.id) || 0;
           return (
             <React.Fragment key={c.id}>
               <Sortable id={c.id} disabled={!edit}>
@@ -755,10 +822,10 @@ function App() {
             </div>
           ) : (
             flatCategories
-              .filter((c) => visible.some((b) => b.category_id === c.id))
+              .filter((c) => displayed.some((b) => b.category_id === c.id))
               .map((c) => {
                 const items = ordered(
-                  visible.filter((b) => b.category_id === c.id),
+                  displayed.filter((b) => b.category_id === c.id),
                 );
                 return (
                   <section className="bookmark-section" key={c.id}>
@@ -766,7 +833,9 @@ function App() {
                       <h2>
                         <Folder size={15} />
                         {selected === c.id ? c.name : breadcrumb(c.id)}
-                        <span>{items.length}</span>
+                        <span>
+                          {visible.filter((b) => b.category_id === c.id).length}
+                        </span>
                       </h2>
                       {edit && (
                         <button
@@ -851,6 +920,15 @@ function App() {
                   </section>
                 );
               })
+          )}
+          {!loading && hasMore && (
+            <button
+              ref={moreRef}
+              className="secondary load-more"
+              onClick={() => setRenderLimit((limit) => limit + 80)}
+            >
+              显示更多（剩余 {orderedVisible.length - displayed.length}）
+            </button>
           )}
         </div>
       </main>
