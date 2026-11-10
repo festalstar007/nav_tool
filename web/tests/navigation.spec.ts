@@ -130,6 +130,99 @@ test.describe.serial("navigation workflow", () => {
     await page.getByRole("button", { name: "取消", exact: true }).click();
     expect(errors).toEqual([]);
   });
+  test("drag bookmarks across folders and into an empty folder", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await page.goto("/");
+    const emptyResponse = await page.request.post("/api/categories", {
+      headers: { "X-Nav-Request": "1" },
+      data: { name: "空目标", parent_id: "" },
+    });
+    expect(emptyResponse.ok()).toBeTruthy();
+    const initial = await (await page.request.get("/api/data")).json();
+    const dailyCategory = initial.categories.find(
+      (c: { name: string }) => c.name === "日常",
+    );
+    const extraResponse = await page.request.post("/api/bookmarks", {
+      headers: { "X-Nav-Request": "1" },
+      data: {
+        category_id: dailyCategory.id,
+        name: "目标后项",
+        url: "https://example.net/after",
+      },
+    });
+    expect(extraResponse.ok()).toBeTruthy();
+    const extra = await extraResponse.json();
+    await page.reload();
+    await page.getByRole("button", { name: "编辑", exact: true }).click();
+    const source = page
+      .locator(".bookmark-link")
+      .filter({ hasText: "GitHub 收藏" });
+    const daily = page.locator(".bookmark-section").filter({
+      has: page.getByRole("heading", { name: /^日常/ }),
+    });
+    async function dragTo(target: ReturnType<typeof page.locator>) {
+      const handle = source
+        .locator("..")
+        .locator("..")
+        .getByRole("button", { name: "拖动排序" });
+      const from = await handle.boundingBox();
+      const to = await target.boundingBox();
+      expect(from).toBeTruthy();
+      expect(to).toBeTruthy();
+      await page.mouse.move(
+        from!.x + from!.width / 2,
+        from!.y + from!.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(from!.x + 10, from!.y + 10, { steps: 3 });
+      await page.mouse.move(to!.x + to!.width * 0.75, to!.y + to!.height / 2, {
+        steps: 20,
+      });
+      await page.mouse.up();
+    }
+    await dragTo(daily.locator(".bookmark-tile").first());
+    await expect(daily.locator(".bookmark-link")).toHaveText([
+      "阅读",
+      "GitHub 收藏",
+      "目标后项",
+    ]);
+    await page.reload();
+    await expect(daily.locator(".bookmark-link")).toHaveText([
+      "阅读",
+      "GitHub 收藏",
+      "目标后项",
+    ]);
+    await page.getByRole("button", { name: "编辑", exact: true }).click();
+    await dragTo(page.getByLabel("移入 空目标"));
+    const emptySection = page.locator(".bookmark-section").filter({
+      has: page.getByRole("heading", { name: /^空目标/ }),
+    });
+    await expect(emptySection.locator(".bookmark-link")).toContainText(
+      "GitHub 收藏",
+    );
+    // Restore the fixture for the following mobile workflow.
+    const data = await (await page.request.get("/api/data")).json();
+    const bookmark = data.bookmarks.find(
+      (b: { name: string }) => b.name === "GitHub 收藏",
+    );
+    const category = data.categories.find(
+      (c: { name: string }) => c.name === "开发与设计",
+    );
+    const restored = await page.request.post(
+      `/api/bookmarks/${bookmark.id}/move`,
+      {
+        headers: { "X-Nav-Request": "1" },
+        data: { category_id: category.id, before_id: "" },
+      },
+    );
+    expect(restored.ok()).toBeTruthy();
+    const removed = await page.request.delete(`/api/bookmarks/${extra.id}`, {
+      headers: { "X-Nav-Request": "1" },
+    });
+    expect(removed.ok()).toBeTruthy();
+  });
   test("mobile navigation and no horizontal overflow", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
@@ -207,4 +300,19 @@ test("large collections render in batches and search includes unloaded bookmarks
   await page.locator(".load-more").scrollIntoViewIfNeeded();
   await expect(page.locator(".bookmark-link")).toHaveCount(240);
   await expect(page.locator(".load-more")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "搜索书签" }).fill("书签 239");
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "搜索书签" })).toHaveValue("");
+  await expect(page.locator(".bookmark-link")).toHaveCount(240);
+  await expect(page.locator(".bookmark-grid .drag-handle")).toHaveCount(240);
+  await expect(
+    page.locator(".bookmark-grid .drag-handle").first(),
+  ).toBeEnabled();
+  await page.getByRole("textbox", { name: "搜索书签" }).fill("书签 239");
+  await expect(page.locator(".bookmark-grid .drag-handle")).toHaveCount(1);
+  await expect(page.locator(".bookmark-grid .drag-handle")).toBeDisabled();
+  await page.getByRole("button", { name: "清空搜索" }).click();
+  await expect(
+    page.locator(".bookmark-grid .drag-handle").first(),
+  ).toBeEnabled();
 });

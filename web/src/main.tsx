@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
+  useDroppable,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -44,6 +46,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import "./style.css";
+import { bookmarkCollision, insertAfter } from "./bookmark-drag";
 
 type Category = {
   id: string;
@@ -173,6 +176,9 @@ function Modal({
 type SortableProps = {
   id: string;
   disabled: boolean;
+  inactive?: boolean;
+  inactiveReason?: string;
+  label?: string;
   children: (handle: React.ReactNode) => React.ReactNode;
 };
 function Sortable(props: SortableProps) {
@@ -185,12 +191,11 @@ function Sortable(props: SortableProps) {
 function ActiveSortable({
   id,
   disabled,
+  inactive = false,
+  inactiveReason,
+  label,
   children,
-}: {
-  id: string;
-  disabled: boolean;
-  children: (handle: React.ReactNode) => React.ReactNode;
-}) {
+}: SortableProps) {
   const {
     attributes,
     listeners,
@@ -198,29 +203,40 @@ function ActiveSortable({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id, disabled });
+    isOver,
+    active,
+    over,
+  } = useSortable({ id, disabled: disabled || inactive, data: { label } });
+  const after =
+    active?.rect.current.translated && over?.rect
+      ? insertAfter(active.rect.current.translated, over.rect)
+      : false;
   return (
     <div
       ref={setNodeRef}
       style={{
-        transform: CSS.Transform.toString(transform),
+        transform:
+          isDragging && label ? undefined : CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.45 : 1,
         zIndex: isDragging ? 5 : undefined,
       }}
-      className="sortable"
+      className={
+        "sortable " +
+        (isOver ? "drop-target " + (after ? "drop-after" : "drop-before") : "")
+      }
     >
       {children(
-        !disabled && (
-          <button
-            className="drag-handle"
-            aria-label="拖动排序"
-            {...attributes}
-            {...listeners}
-          >
-            <GripVertical size={15} />
-          </button>
-        ),
+        <button
+          className="drag-handle"
+          aria-label="拖动排序"
+          disabled={inactive}
+          title={inactiveReason || "拖动排序"}
+          {...attributes}
+          {...(inactive ? {} : listeners)}
+        >
+          <GripVertical size={15} />
+        </button>,
       )}
     </div>
   );
@@ -272,6 +288,94 @@ function ActiveSortGroup({
         {children}
       </SortableContext>
     </DndContext>
+  );
+}
+function BookmarkBoard({
+  disabled,
+  onDrop,
+  children,
+}: {
+  disabled: boolean;
+  onDrop: (event: DragEndEvent) => void;
+  children: React.ReactNode;
+}) {
+  return disabled ? (
+    <>{children}</>
+  ) : (
+    <ActiveBookmarkBoard onDrop={onDrop}>{children}</ActiveBookmarkBoard>
+  );
+}
+function ActiveBookmarkBoard({
+  onDrop,
+  children,
+}: {
+  onDrop: (event: DragEndEvent) => void;
+  children: React.ReactNode;
+}) {
+  const [preview, setPreview] = useState<{
+    name: string;
+    width: number;
+  } | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={bookmarkCollision}
+      onDragStart={({ active }) =>
+        setPreview({
+          name: active.data.current?.label || "",
+          width: active.rect.current.initial?.width || 168,
+        })
+      }
+      onDragCancel={() => setPreview(null)}
+      onDragEnd={(event) => {
+        setPreview(null);
+        onDrop(event);
+      }}
+    >
+      {children}
+      <DragOverlay dropAnimation={null}>
+        {preview && (
+          <div
+            className="bookmark-drag-preview"
+            style={{ width: preview.width }}
+          >
+            <GripVertical size={15} />
+            <span>{preview.name}</span>
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+function BookmarkSection({
+  category,
+  disabled,
+  empty,
+  children,
+}: {
+  category: Category;
+  disabled: boolean;
+  empty: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: "bookmark-section-" + category.id,
+    data: { categoryId: category.id, section: true, empty },
+    disabled,
+  });
+  return (
+    <section
+      ref={setNodeRef}
+      className={"bookmark-section " + (isOver ? "over" : "")}
+    >
+      {children}
+    </section>
   );
 }
 function Icon({ b }: { b: Bookmark }) {
@@ -381,6 +485,8 @@ function App() {
     parent: string,
     ids: string[],
   ) {
+    if (busy) return;
+    setBusy(true);
     const previous = data;
     setData((d) => ({
       ...d,
@@ -394,6 +500,8 @@ function App() {
     } catch (e) {
       setData(previous);
       message(e);
+    } finally {
+      setBusy(false);
     }
   }
   const breadcrumb = (id: string): string => {
@@ -549,6 +657,54 @@ function App() {
       b.category_id,
       arrayMove(group, i, i + direction).map((v) => v.id),
     );
+  }
+  async function dropBookmark(event: DragEndEvent) {
+    if (busy || !event.over || event.active.id === event.over.id) return;
+    const moved = data.bookmarks.find((b) => b.id === event.active.id);
+    const target = data.bookmarks.find((b) => b.id === event.over!.id);
+    if (!moved) return;
+    const category = target?.category_id || event.over.data.current?.categoryId;
+    if (!category) return;
+    if (!target && category === moved.category_id) return;
+    const group = ordered(
+      data.bookmarks.filter((b) => b.category_id === category),
+    );
+    if (category === moved.category_id && target) {
+      void reorder(
+        "bookmarks",
+        category,
+        arrayMove(
+          group,
+          group.findIndex((b) => b.id === moved.id),
+          group.findIndex((b) => b.id === target.id),
+        ).map((b) => b.id),
+      );
+      return;
+    }
+    let index = target
+      ? group.findIndex((b) => b.id === target.id)
+      : group.length;
+    const rect = event.active.rect.current.translated;
+    if (target && rect) {
+      if (insertAfter(rect, event.over.rect)) index++;
+    }
+    setBusy(true);
+    try {
+      const updated = await api<Data>(
+        "/bookmarks/" + moved.id + "/move",
+        "POST",
+        {
+          category_id: category,
+          before_id: group[index]?.id || "",
+        },
+      );
+      setData(updated);
+      setNotice("已移入 " + breadcrumb(category));
+    } catch (e) {
+      message(e);
+    } finally {
+      setBusy(false);
+    }
   }
   async function fetchIcon(bid: string) {
     try {
@@ -756,7 +912,10 @@ function App() {
           <div className="topbar-actions">
             <button
               className={"secondary " + (edit ? "selected" : "")}
-              onClick={() => setEdit((v) => !v)}
+              onClick={() => {
+                if (!edit) setSearch("");
+                setEdit((v) => !v);
+              }}
             >
               {edit ? <Check size={15} /> : <Pencil size={15} />}
               <span>{edit ? "完成编辑" : "编辑"}</span>
@@ -821,105 +980,141 @@ function App() {
               )}
             </div>
           ) : (
-            flatCategories
-              .filter((c) => displayed.some((b) => b.category_id === c.id))
-              .map((c) => {
-                const items = ordered(
-                  displayed.filter((b) => b.category_id === c.id),
-                );
-                return (
-                  <section className="bookmark-section" key={c.id}>
-                    <div className="group-heading">
-                      <h2>
-                        <Folder size={15} />
-                        {selected === c.id ? c.name : breadcrumb(c.id)}
-                        <span>
-                          {visible.filter((b) => b.category_id === c.id).length}
-                        </span>
-                      </h2>
-                      {edit && (
-                        <button
-                          className="icon-btn small"
-                          aria-label={"向 " + c.name + " 添加书签"}
-                          onClick={() =>
-                            setModal({ kind: "bookmark", category: c.id })
-                          }
-                        >
-                          <Plus size={15} />
-                        </button>
-                      )}
-                    </div>
-                    <SortGroup
-                      items={items.map((b) => b.id)}
-                      disabled={!edit || !!query}
-                      onSort={(ids) => void reorder("bookmarks", c.id, ids)}
+            <BookmarkBoard
+              disabled={!edit}
+              onDrop={(event) => void dropBookmark(event)}
+            >
+              {flatCategories
+                .filter(
+                  (c) =>
+                    displayed.some((b) => b.category_id === c.id) ||
+                    (edit && !query && (!scope || scope.has(c.id))),
+                )
+                .map((c) => {
+                  const items = ordered(
+                    displayed.filter((b) => b.category_id === c.id),
+                  );
+                  return (
+                    <BookmarkSection
+                      category={c}
+                      disabled={!edit || !!query || busy}
+                      empty={items.length === 0}
+                      key={c.id}
                     >
-                      <div
-                        className={"bookmark-grid " + (edit ? "editing" : "")}
-                      >
-                        {items.map((b) => (
-                          <Sortable
-                            key={b.id}
-                            id={b.id}
-                            disabled={!edit || !!query}
+                      <div className="group-heading">
+                        <h2>
+                          <Folder size={15} />
+                          {selected === c.id ? c.name : breadcrumb(c.id)}
+                          <span>
+                            {
+                              visible.filter((b) => b.category_id === c.id)
+                                .length
+                            }
+                          </span>
+                        </h2>
+                        {edit && (
+                          <button
+                            className="icon-btn small"
+                            aria-label={"向 " + c.name + " 添加书签"}
+                            onClick={() =>
+                              setModal({ kind: "bookmark", category: c.id })
+                            }
                           >
-                            {(handle) => (
-                              <div className="bookmark-tile">
-                                {handle}
-                                <a
-                                  className="bookmark-link"
-                                  href={b.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title={
-                                    b.name +
-                                    "\n" +
-                                    b.url +
-                                    (b.note ? "\n" + b.note : "")
-                                  }
-                                  onClick={(e) => {
-                                    if (edit) {
-                                      e.preventDefault();
-                                      setModal({ kind: "bookmark", value: b });
-                                    }
-                                  }}
-                                >
-                                  <Icon b={b} />
-                                  <span>{b.name}</span>
-                                  {!edit && (
-                                    <ArrowUpRight
-                                      className="link-arrow"
-                                      size={12}
-                                    />
-                                  )}
-                                </a>
-                                {edit && (
-                                  <div className="tile-actions">
-                                    <button
-                                      aria-label={"前移 " + b.name}
-                                      onClick={() => moveBookmark(b, -1)}
-                                      disabled={busy}
-                                    >
-                                      <ArrowUp size={11} />
-                                    </button>
-                                    <button
-                                      aria-label={"后移 " + b.name}
-                                      onClick={() => moveBookmark(b, 1)}
-                                      disabled={busy}
-                                    >
-                                      <ArrowDown size={11} />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </Sortable>
-                        ))}
+                            <Plus size={15} />
+                          </button>
+                        )}
                       </div>
-                    </SortGroup>
-                  </section>
-                );
-              })
+                      <SortableContext
+                        items={items.map((b) => b.id)}
+                        strategy={rectSortingStrategy}
+                      >
+                        <div
+                          className={"bookmark-grid " + (edit ? "editing" : "")}
+                        >
+                          {edit && !query && items.length === 0 && (
+                            <div
+                              className="empty-bookmark-drop"
+                              aria-label={"移入 " + c.name}
+                            >
+                              拖到这里
+                            </div>
+                          )}
+                          {items.map((b) => (
+                            <Sortable
+                              key={b.id}
+                              id={b.id}
+                              label={b.name}
+                              disabled={!edit}
+                              inactive={!!query || busy}
+                              inactiveReason={
+                                query
+                                  ? "清空搜索后可拖动"
+                                  : busy
+                                    ? "正在保存"
+                                    : undefined
+                              }
+                            >
+                              {(handle) => (
+                                <div className="bookmark-tile">
+                                  {handle}
+                                  <a
+                                    className="bookmark-link"
+                                    href={b.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={
+                                      b.name +
+                                      "\n" +
+                                      b.url +
+                                      (b.note ? "\n" + b.note : "")
+                                    }
+                                    onClick={(e) => {
+                                      if (edit) {
+                                        e.preventDefault();
+                                        setModal({
+                                          kind: "bookmark",
+                                          value: b,
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    <Icon b={b} />
+                                    <span>{b.name}</span>
+                                    {!edit && (
+                                      <ArrowUpRight
+                                        className="link-arrow"
+                                        size={12}
+                                      />
+                                    )}
+                                  </a>
+                                  {edit && (
+                                    <div className="tile-actions">
+                                      <button
+                                        aria-label={"前移 " + b.name}
+                                        onClick={() => moveBookmark(b, -1)}
+                                        disabled={busy}
+                                      >
+                                        <ArrowUp size={11} />
+                                      </button>
+                                      <button
+                                        aria-label={"后移 " + b.name}
+                                        onClick={() => moveBookmark(b, 1)}
+                                        disabled={busy}
+                                      >
+                                        <ArrowDown size={11} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </Sortable>
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </BookmarkSection>
+                  );
+                })}
+            </BookmarkBoard>
           )}
           {!loading && hasMore && (
             <button

@@ -123,6 +123,100 @@ func TestCategoriesAndTransactionalOrder(t *testing.T) {
 		t.Fatal("non-empty category deleted")
 	}
 }
+func TestMoveBookmarkAcrossCategories(t *testing.T) {
+	a := newTestApp(t)
+	cookie := admin(t, a)
+	for _, c := range []Category{{ID: "source", Name: "来源"}, {ID: "target", Name: "目标"}, {ID: "empty", Name: "空分类", ParentID: "target"}} {
+		if err := a.saveCategory(c, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, b := range []Bookmark{
+		{ID: "a", CategoryID: "source", Name: "A", URL: "https://example.com/a", Note: "保留备注", Icon: "a.png"},
+		{ID: "b", CategoryID: "source", Name: "B", URL: "https://example.com/b"},
+		{ID: "c", CategoryID: "target", Name: "C", URL: "https://example.com/c"},
+		{ID: "d", CategoryID: "target", Name: "D", URL: "https://example.com/d"},
+	} {
+		if err := a.saveBookmark(b, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertOrder := func(cid string, want string) {
+		t.Helper()
+		rows, err := a.db.Query("SELECT id,sort_order FROM bookmarks WHERE category_id=? ORDER BY sort_order,id", cid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var got []string
+		for rows.Next() {
+			var id string
+			var order int
+			if err := rows.Scan(&id, &order); err != nil {
+				t.Fatal(err)
+			}
+			if order != len(got) {
+				t.Fatal("non-contiguous positions", cid, order)
+			}
+			got = append(got, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got, ",") != want {
+			t.Fatalf("%s: got %v, want %s", cid, got, want)
+		}
+	}
+	move := map[string]string{"category_id": "target", "before_id": "d"}
+	if w := call(t, a, "POST", "/api/bookmarks/a/move", move, nil, true); w.Code != 401 {
+		t.Fatal("unauthenticated move accepted")
+	}
+	if w := call(t, a, "POST", "/api/bookmarks/a/move", move, cookie, false); w.Code != 403 {
+		t.Fatal("move without request protection accepted")
+	}
+	if w := call(t, a, "POST", "/api/bookmarks/a/move", move, cookie, true); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	assertOrder("source", "b")
+	assertOrder("target", "c,a,d")
+	var name, href, note, icon string
+	if err := a.db.QueryRow("SELECT name,url,note,icon FROM bookmarks WHERE id='a'").Scan(&name, &href, &note, &icon); err != nil {
+		t.Fatal(err)
+	}
+	if name != "A" || href != "https://example.com/a" || note != "保留备注" || icon != "a.png" {
+		t.Fatal("move changed bookmark content")
+	}
+	for _, invalid := range []map[string]string{
+		{"category_id": "source", "before_id": "d"},
+		{"category_id": "missing"},
+		{"category_id": "target", "before_id": "missing"},
+		{"category_id": "target", "before_id": "a"},
+	} {
+		if w := call(t, a, "POST", "/api/bookmarks/a/move", invalid, cookie, true); w.Code != 400 {
+			t.Fatal("invalid destination accepted", w.Code)
+		}
+		assertOrder("source", "b")
+		assertOrder("target", "c,a,d")
+	}
+	if err := a.placeBookmark("missing", "source", ""); err == nil {
+		t.Fatal("missing bookmark accepted")
+	}
+	if err := a.placeBookmark("a", "target", "c"); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("target", "a,c,d")
+	if err := a.placeBookmark("a", "empty", ""); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("target", "c,d")
+	assertOrder("empty", "a")
+	if err := a.placeBookmark("a", "target", ""); err != nil {
+		t.Fatal(err)
+	}
+	assertOrder("empty", "")
+	assertOrder("target", "c,d,a")
+}
+
 func TestImportNestedFoldersAndIdempotence(t *testing.T) {
 	a := newTestApp(t)
 	source := `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><H3>技术</H3><DL><p><DT><H3>Go &amp; SQL</H3><DL><p><DT><A HREF="https://EXAMPLE.com/">例子</A><DT><A HREF="https://example.com">重复</A><DT><A HREF="javascript:alert(1)">无效</A></DL><p><DT><A HREF="https://example.org/">父目录链接</A></DL><p><DT><H3>生活</H3><DL><p><DT><A HREF="https://example.com">跨分类允许</A></DL></DL>`

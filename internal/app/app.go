@@ -93,6 +93,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/bookmarks/{id}", a.protect(a.bookmark))
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.protect(a.bookmark))
 	mux.HandleFunc("POST /api/bookmarks/{id}/icon", a.protect(a.icon))
+	mux.HandleFunc("POST /api/bookmarks/{id}/move", a.protect(a.moveBookmark))
 	mux.HandleFunc("POST /api/reorder", a.protect(a.sort))
 	mux.HandleFunc("POST /api/import/{action}", a.protect(a.importHTML))
 	mux.HandleFunc("GET /api/backups", a.protect(a.backupStatus))
@@ -390,6 +391,26 @@ func (a *App) bookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	send(w, b)
+}
+func (a *App) moveBookmark(w http.ResponseWriter, r *http.Request) {
+	var v struct {
+		CategoryID string `json:"category_id"`
+		BeforeID   string `json:"before_id"`
+	}
+	if !check(w, decode(r, &v)) {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !check(w, a.placeBookmark(r.PathValue("id"), v.CategoryID, v.BeforeID)) {
+		return
+	}
+	d, err := a.data()
+	if err != nil {
+		fail(w, 500, "读取失败，请刷新页面")
+		return
+	}
+	send(w, d)
 }
 func (a *App) sort(w http.ResponseWriter, r *http.Request) {
 	var v struct {

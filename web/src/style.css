@@ -397,6 +397,53 @@ button svg {
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 8px;
 }
+.empty-bookmark-drop {
+  grid-column: 1 / -1;
+  padding: 16px;
+  border: 1px dashed #b8cdbf;
+  border-radius: 7px;
+  color: #718177;
+  font-size: 12px;
+  text-align: center;
+}
+.bookmark-section.over .empty-bookmark-drop,
+.bookmark-grid .drop-target .bookmark-tile {
+  border-color: #46865a;
+  background: #edf5ef;
+}
+.bookmark-drag-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 47px;
+  padding: 0 8px;
+  background: #edf5ef;
+  border: 1px solid #46865a;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px #213b2b30;
+  font-size: 12px;
+}
+.bookmark-drag-preview span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.bookmark-grid .drop-target::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: #46865a;
+  pointer-events: none;
+}
+.bookmark-grid .drop-before::after {
+  left: -5px;
+}
+.bookmark-grid .drop-after::after {
+  right: -5px;
+}
 .sortable {
   min-width: 0;
   position: relative;

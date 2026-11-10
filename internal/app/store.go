@@ -178,6 +178,74 @@ func (a *App) saveBookmark(b Bookmark, update bool) error {
 	return err
 }
 
+// placeBookmark changes category and position together, preserving all other
+// bookmark fields and compacting both affected lists in one transaction.
+func (a *App) placeBookmark(bid, category, before string) error {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var source string
+	if err = tx.QueryRow("SELECT category_id FROM bookmarks WHERE id=?", bid).Scan(&source); err != nil {
+		return errors.New("书签不存在")
+	}
+	var exists int
+	if err = tx.QueryRow("SELECT 1 FROM categories WHERE id=?", category).Scan(&exists); err != nil {
+		return errors.New("目标分类不存在")
+	}
+	if before == bid {
+		return errors.New("目标位置无效")
+	}
+	groups := map[string][]string{source: {}, category: {}}
+	rows, err := tx.Query("SELECT id,category_id FROM bookmarks WHERE category_id IN (?,?) ORDER BY sort_order,id", source, category)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, cid string
+		if err = rows.Scan(&id, &cid); err != nil {
+			rows.Close()
+			return err
+		}
+		if id != bid {
+			groups[cid] = append(groups[cid], id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	target := groups[category]
+	index := len(target)
+	if before != "" {
+		index = -1
+		for i, id := range target {
+			if id == before {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return errors.New("目标书签已变化，请刷新后重试")
+		}
+	}
+	target = append(target, "")
+	copy(target[index+1:], target[index:])
+	target[index] = bid
+	groups[category] = target
+	updated := stamp()
+	for cid, ids := range groups {
+		for order, id := range ids {
+			if _, err = tx.Exec("UPDATE bookmarks SET category_id=?,sort_order=?,updated_at=? WHERE id=?", cid, order, updated, id); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
 // Reorder validates the complete sibling set before writing any positions.
 func (a *App) reorder(kind, parent string, ids []string) error {
 	table, field := "bookmarks", "category_id"
