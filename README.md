@@ -111,7 +111,40 @@ systemctl --user restart nav-tool.service
 journalctl --user -u nav-tool.service -n 50 --no-pager
 ```
 
-更新 Go 可执行文件后重启服务；仅更新前端静态文件无需重启。`deploy/nav-tool.service` 是备用的系统级服务示例，本机未采用；不要同时启用两份服务占用同一端口。
+`deploy/nav-tool.service` 是备用的系统级服务示例，本机未采用；不要同时启用两份服务占用同一端口。
+
+### 日常更新上线
+
+SSH 登录 VPS 后，以运行服务的 `fstar` 用户进入项目目录并拉取更新。如果拉取失败，先解决 Git 提示的问题再继续。
+
+```sh
+cd /home/fstar/project/nav_tool
+git pull --ff-only origin main
+```
+
+如果更新涉及前端，从项目根目录运行构建命令。
+
+```sh
+(cd web && npm ci && npm run build)
+```
+
+构建成功后，现有 Go 服务会直接提供新的 `web/dist`。只更新前端时无需重启服务。
+
+如果更新涉及 Go 后端，在项目根目录执行以下命令。若前后端都更新，先构建前端。Go 编译成功后才替换可执行文件并重启用户服务。
+
+```sh
+go build -buildvcs=false -trimpath -ldflags='-s -w' \
+  -o bin/navtool.new ./cmd/navtool &&
+  mv bin/navtool.new bin/navtool &&
+  systemctl --user restart nav-tool.service
+```
+
+更新后打开 <https://nav.345001.xyz>，登录并检查本次修改的功能。若页面打不开，可用以下命令检查服务状态和最近日志。
+
+```sh
+systemctl --user status nav-tool.service --no-pager
+journalctl --user -u nav-tool.service -n 50 --no-pager
+```
 
 Docker 部署可使用 `docker compose up -d --build`，配置以非 root 运行、删除 capabilities、只读根文件系统，端口仅绑定 `127.0.0.1:31506`。数据使用命名卷；不挂载 Docker socket。弱 VPS 推荐在开发机完成构建。Docker 镜像构建需要网络，本地不代表已经验证镜像构建。
 
