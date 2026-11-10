@@ -393,7 +393,9 @@ function Icon({ b }: { b: Bookmark }) {
       height={20}
     />
   ) : (
-    <span className="site-fallback">{b.name.slice(0, 1).toUpperCase()}</span>
+    <span className="site-fallback" aria-hidden="true">
+      {b.name.slice(0, 1).toUpperCase()}
+    </span>
   );
 }
 function App() {
@@ -912,6 +914,7 @@ function App() {
           <div className="topbar-actions">
             <button
               className={"secondary " + (edit ? "selected" : "")}
+              aria-label={edit ? "完成编辑" : "编辑"}
               onClick={() => {
                 if (!edit) setSearch("");
                 setEdit((v) => !v);
@@ -922,6 +925,7 @@ function App() {
             </button>
             <button
               className="primary"
+              aria-label="添加书签"
               onClick={() => {
                 if (!data.categories.length) {
                   setModal({ kind: "category" });
@@ -1566,7 +1570,9 @@ function ImportDialog({
               f.set("file", file);
               const result = await api<Plan>("/import/apply", "POST", f);
               await onDone();
-              message(`已导入 ${result.added} 条书签`);
+              message(
+                `新增 ${result.added} 条，重复跳过 ${result.duplicates} 条，无效或不支持 ${result.skipped} 条`,
+              );
             } catch (e) {
               message(e);
             } finally {

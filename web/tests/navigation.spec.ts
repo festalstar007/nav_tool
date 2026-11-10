@@ -29,6 +29,8 @@ const fixture =
   names
     .map((name, i) => `<DT><A HREF="https://example.com/${i}">${name}</A>`)
     .join("") +
+  '<DT><A HREF="https://example.com/0">重复书签</A>' +
+  '<DT><A HREF="ftp://example.com/">不支持的链接</A>' +
   '<DT><H3>参考资料</H3><DL><p><DT><A HREF="https://example.org/guide">指南</A></DL></DL><DT><H3>日常</H3><DL><p><DT><A HREF="https://example.net/">阅读</A></DL></DL>';
 test.describe.serial("navigation workflow", () => {
   test.beforeAll(async () => {
@@ -67,6 +69,9 @@ test.describe.serial("navigation workflow", () => {
     });
     await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
     await page.getByRole("button", { name: "确认导入" }).click();
+    await expect(
+      page.getByText("新增 20 条，重复跳过 1 条，无效或不支持 1 条"),
+    ).toBeVisible();
     await expect(page.locator(".bookmark-link")).toHaveCount(20);
     await page
       .locator(".category-label")
@@ -183,17 +188,11 @@ test.describe.serial("navigation workflow", () => {
       await page.mouse.up();
     }
     await dragTo(daily.locator(".bookmark-tile").first());
-    await expect(daily.locator(".bookmark-link")).toHaveText([
-      "阅读",
-      "GitHub 收藏",
-      "目标后项",
-    ]);
+    const dailyNames = daily.locator(".bookmark-link > span:last-of-type");
+    const expectedOrder = ["阅读", "GitHub 收藏", "目标后项"];
+    await expect(dailyNames).toHaveText(expectedOrder);
     await page.reload();
-    await expect(daily.locator(".bookmark-link")).toHaveText([
-      "阅读",
-      "GitHub 收藏",
-      "目标后项",
-    ]);
+    await expect(dailyNames).toHaveText(expectedOrder);
     await page.getByRole("button", { name: "编辑", exact: true }).click();
     await dragTo(page.getByLabel("移入 空目标"));
     const emptySection = page.locator(".bookmark-section").filter({
@@ -227,6 +226,9 @@ test.describe.serial("navigation workflow", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await expect(page.locator(".bookmark-link")).toHaveCount(20);
+    await expect(
+      page.getByRole("button", { name: "添加书签", exact: true }),
+    ).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
