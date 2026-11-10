@@ -90,6 +90,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/categories/{id}", a.protect(a.category))
 	mux.HandleFunc("DELETE /api/categories/{id}", a.protect(a.category))
 	mux.HandleFunc("POST /api/bookmarks", a.protect(a.bookmark))
+	mux.HandleFunc("POST /api/bookmarks/batch-delete", a.protect(a.batchDeleteBookmarks))
 	mux.HandleFunc("PUT /api/bookmarks/{id}", a.protect(a.bookmark))
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", a.protect(a.bookmark))
 	mux.HandleFunc("POST /api/bookmarks/{id}/icon", a.protect(a.icon))
@@ -366,13 +367,12 @@ func (a *App) bookmark(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	bid := r.PathValue("id")
 	if r.Method == "DELETE" {
-		res, e := a.db.Exec("DELETE FROM bookmarks WHERE id=?", bid)
-		if !check(w, e) {
+		err := a.deleteBookmarks([]string{bid})
+		if errors.Is(err, errBookmarkMissing) {
+			fail(w, 404, "书签不存在")
 			return
 		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
-			fail(w, 404, "书签不存在")
+		if !check(w, err) {
 			return
 		}
 		send(w, map[string]bool{"ok": true})

@@ -404,6 +404,9 @@ function App() {
   const [selected, setSelected] = useState("");
   const [search, setSearch] = useState("");
   const [edit, setEdit] = useState(false);
+  const [batch, setBatch] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -434,6 +437,7 @@ function App() {
   async function load() {
     const d = await api<Data>("/data");
     setData(d);
+    setSelected((id) => (d.categories.some((c) => c.id === id) ? id : ""));
     return d;
   }
   useEffect(() => {
@@ -442,6 +446,8 @@ function App() {
       setAuth((a) => (a ? { ...a, authenticated: false } : null));
       setData({ categories: [], bookmarks: [] });
       setModal(null);
+      setBatch(false);
+      setChecked(new Set());
     };
     window.addEventListener("nav-unauthorized", unauth);
     return () => window.removeEventListener("nav-unauthorized", unauth);
@@ -528,6 +534,33 @@ function App() {
   };
   const scope = selected ? descendants(selected) : null;
   const query = search.trim().toLocaleLowerCase();
+  useEffect(() => {
+    setChecked(new Set());
+    setDeleteConfirm(false);
+  }, [selected, query, batch, edit]);
+  const toggleChecked = (id: string) => {
+    if (busy) return;
+    setChecked((previous) => {
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  async function deleteChecked() {
+    if (busy || !checked.size) return;
+    setBusy(true);
+    try {
+      await api("/bookmarks/batch-delete", "POST", { ids: [...checked] });
+      setDeleteConfirm(false);
+      setChecked(new Set());
+      await load();
+      setNotice("已删除所选书签并清理空分类");
+    } catch (e) {
+      message(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   const visible = data.bookmarks.filter(
     (b) =>
       (!scope || !!query || scope.has(b.category_id)) &&
@@ -568,6 +601,7 @@ function App() {
     return () => observer.disconnect();
   }, [hasMore, renderLimit, selected, query, loading, edit]);
   const choose = (id: string) => {
+    if (busy) return;
     setSelected(id);
     setSearch("");
     setSideOpen(false);
@@ -585,7 +619,7 @@ function App() {
     return (
       <SortGroup
         items={items.map((c) => c.id)}
-        disabled={!edit}
+        disabled={!edit || batch}
         onSort={(ids) => void reorder("categories", parent, ids)}
       >
         {items.map((c) => {
@@ -593,7 +627,7 @@ function App() {
           const count = categoryCounts.get(c.id) || 0;
           return (
             <React.Fragment key={c.id}>
-              <Sortable id={c.id} disabled={!edit}>
+              <Sortable id={c.id} disabled={!edit || batch}>
                 {(handle) => (
                   <div
                     className={
@@ -867,6 +901,7 @@ function App() {
                   setData({ categories: [], bookmarks: [] });
                   setSelected("");
                   setEdit(false);
+                  setBatch(false);
                 })
                 .catch(message);
             }}
@@ -912,11 +947,22 @@ function App() {
             )}
           </div>
           <div className="topbar-actions">
+            {edit && (
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => setBatch((value) => !value)}
+              >
+                {batch ? "取消选择" : "批量选择"}
+              </button>
+            )}
             <button
               className={"secondary " + (edit ? "selected" : "")}
               aria-label={edit ? "完成编辑" : "编辑"}
+              disabled={busy}
               onClick={() => {
                 if (!edit) setSearch("");
+                setBatch(false);
                 setEdit((v) => !v);
               }}
             >
@@ -943,6 +989,32 @@ function App() {
           </div>
         </header>
         <div className="content">
+          {batch && (
+            <div className="batch-toolbar">
+              <span role="status">已选 {checked.size} 项</span>
+              <button
+                className="secondary"
+                disabled={busy || !visible.length}
+                onClick={() => setChecked(new Set(visible.map((b) => b.id)))}
+              >
+                全选当前结果
+              </button>
+              <button
+                className="secondary"
+                disabled={busy || !checked.size}
+                onClick={() => setChecked(new Set())}
+              >
+                清空选择
+              </button>
+              <button
+                className="primary"
+                disabled={busy || !checked.size}
+                onClick={() => setDeleteConfirm(true)}
+              >
+                删除所选
+              </button>
+            </div>
+          )}
           {(query || selected) && (
             <div className="page-heading">
               <div>
@@ -985,7 +1057,7 @@ function App() {
             </div>
           ) : (
             <BookmarkBoard
-              disabled={!edit}
+              disabled={!edit || batch}
               onDrop={(event) => void dropBookmark(event)}
             >
               {flatCategories
@@ -1001,7 +1073,7 @@ function App() {
                   return (
                     <BookmarkSection
                       category={c}
-                      disabled={!edit || !!query || busy}
+                      disabled={!edit || batch || !!query || busy}
                       empty={items.length === 0}
                       key={c.id}
                     >
@@ -1048,7 +1120,7 @@ function App() {
                               key={b.id}
                               id={b.id}
                               label={b.name}
-                              disabled={!edit}
+                              disabled={!edit || batch}
                               inactive={!!query || busy}
                               inactiveReason={
                                 query
@@ -1061,6 +1133,16 @@ function App() {
                               {(handle) => (
                                 <div className="bookmark-tile">
                                   {handle}
+                                  {batch && (
+                                    <input
+                                      type="checkbox"
+                                      className="bookmark-checkbox"
+                                      aria-label={"选择书签 " + b.name}
+                                      checked={checked.has(b.id)}
+                                      disabled={busy}
+                                      onChange={() => toggleChecked(b.id)}
+                                    />
+                                  )}
                                   <a
                                     className="bookmark-link"
                                     href={b.url}
@@ -1075,6 +1157,10 @@ function App() {
                                     onClick={(e) => {
                                       if (edit) {
                                         e.preventDefault();
+                                        if (batch) {
+                                          toggleChecked(b.id);
+                                          return;
+                                        }
                                         setModal({
                                           kind: "bookmark",
                                           value: b,
@@ -1091,7 +1177,7 @@ function App() {
                                       />
                                     )}
                                   </a>
-                                  {edit && (
+                                  {edit && !batch && (
                                     <div className="tile-actions">
                                       <button
                                         aria-label={"前移 " + b.name}
@@ -1131,6 +1217,35 @@ function App() {
           )}
         </div>
       </main>
+      {deleteConfirm && (
+        <Modal
+          title="删除书签"
+          onClose={() => {
+            if (!busy) setDeleteConfirm(false);
+          }}
+        >
+          <p>
+            删除选中的 {checked.size} 个书签？因此变空的分类及上级分类也会删除。
+          </p>
+          <div className="modal-actions">
+            <span />
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setDeleteConfirm(false)}
+            >
+              取消
+            </button>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => void deleteChecked()}
+            >
+              {busy ? "删除中…" : "确认删除"}
+            </button>
+          </div>
+        </Modal>
+      )}
       {modal?.kind === "category" && (
         <CategoryEditor
           value={modal.value}
@@ -1182,7 +1297,9 @@ function App() {
           onDelete={
             modal.value
               ? () => {
-                  if (confirm("删除这个书签？"))
+                  if (
+                    confirm("删除这个书签？因此变空的分类及上级分类也会删除。")
+                  )
                     void perform(() =>
                       api("/bookmarks/" + modal.value!.id, "DELETE"),
                     );
