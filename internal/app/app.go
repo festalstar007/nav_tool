@@ -367,7 +367,7 @@ func (a *App) bookmark(w http.ResponseWriter, r *http.Request) {
 	defer a.mu.Unlock()
 	bid := r.PathValue("id")
 	if r.Method == "DELETE" {
-		err := a.deleteBookmarks([]string{bid})
+		result, err := a.deleteBookmarks([]string{bid})
 		if errors.Is(err, errBookmarkMissing) {
 			fail(w, 404, "书签不存在")
 			return
@@ -375,7 +375,7 @@ func (a *App) bookmark(w http.ResponseWriter, r *http.Request) {
 		if !check(w, err) {
 			return
 		}
-		send(w, map[string]bool{"ok": true})
+		send(w, result)
 		return
 	}
 	var b Bookmark

@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"encoding/json"
+	"slices"
+	"testing"
+)
 
 func TestBatchDeletePrunesOnlyAffectedEmptyAncestors(t *testing.T) {
 	a := newTestApp(t)
@@ -49,6 +53,15 @@ func TestBatchDeletePrunesOnlyAffectedEmptyAncestors(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	var deleted bookmarkDeletion
+	if err := json.Unmarshal(w.Body.Bytes(), &deleted); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(deleted.BookmarkIDs)
+	slices.Sort(deleted.CategoryIDs)
+	if !slices.Equal(deleted.BookmarkIDs, []string{"a", "b", "c"}) || !slices.Equal(deleted.CategoryIDs, []string{"branch", "leaf"}) {
+		t.Fatal("unexpected deletion result", deleted)
+	}
 	d, err := a.data()
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +81,13 @@ func TestBatchDeletePrunesOnlyAffectedEmptyAncestors(t *testing.T) {
 	w = call(t, a, "DELETE", "/api/bookmarks/d", nil, cookie, true)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &deleted); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(deleted.CategoryIDs)
+	if !slices.Equal(deleted.BookmarkIDs, []string{"d"}) || !slices.Equal(deleted.CategoryIDs, []string{"keep", "root"}) {
+		t.Fatal("unexpected single deletion result", deleted)
 	}
 	d, err = a.data()
 	if err != nil {
@@ -89,7 +109,7 @@ func TestBatchDeleteRollsBackPruningFailure(t *testing.T) {
 	if _, err := a.db.Exec(`CREATE TRIGGER fail_prune BEFORE DELETE ON categories BEGIN SELECT RAISE(ABORT,'test failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.deleteBookmarks([]string{"a"}); err == nil {
+	if _, err := a.deleteBookmarks([]string{"a"}); err == nil {
 		t.Fatal("expected failure")
 	}
 	d, err := a.data()

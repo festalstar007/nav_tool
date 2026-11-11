@@ -64,6 +64,7 @@ type Bookmark = {
   sort_order: number;
 };
 type Data = { categories: Category[]; bookmarks: Bookmark[] };
+type Deletion = { bookmark_ids: string[]; category_ids: string[] };
 type Auth = { initialized: boolean; authenticated: boolean };
 type BackupConfig = {
   enabled: boolean;
@@ -546,14 +547,76 @@ function App() {
       return next;
     });
   };
+  function applyDeletion(result: Deletion) {
+    const bookmarkIDs = new Set(result.bookmark_ids);
+    const categoryIDs = new Set(result.category_ids);
+    setData((previous) => ({
+      categories: previous.categories.filter((c) => !categoryIDs.has(c.id)),
+      bookmarks: previous.bookmarks.filter((b) => !bookmarkIDs.has(b.id)),
+    }));
+    setSelected((id) => {
+      // Keep the current scope unless it was actually removed by the server.
+      while (id && categoryIDs.has(id)) {
+        const category = data.categories.find((c) => c.id === id);
+        if (!category) return "";
+        const siblings = ordered(
+          data.categories.filter((c) => c.parent_id === category.parent_id),
+        );
+        const index = siblings.findIndex((c) => c.id === id);
+        const next = siblings
+          .slice(index + 1)
+          .find((c) => !categoryIDs.has(c.id));
+        const previous = siblings
+          .slice(0, index)
+          .reverse()
+          .find((c) => !categoryIDs.has(c.id));
+        if (next || previous) return (next || previous)!.id;
+        id = category.parent_id;
+      }
+      return id;
+    });
+    setChecked(
+      (previous) => new Set([...previous].filter((id) => !bookmarkIDs.has(id))),
+    );
+  }
+  async function deleteBookmark(id: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await api<Deletion>("/bookmarks/" + id, "DELETE");
+      applyDeletion(result);
+      setModal(null);
+      setNotice("已删除书签");
+    } catch (e) {
+      message(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteCategory(id: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api("/categories/" + id, "DELETE");
+      applyDeletion({ bookmark_ids: [], category_ids: [id] });
+      setModal(null);
+      setNotice("已删除分类");
+    } catch (e) {
+      message(e);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function deleteChecked() {
     if (busy || !checked.size) return;
     setBusy(true);
     try {
-      await api("/bookmarks/batch-delete", "POST", { ids: [...checked] });
+      const result = await api<Deletion>("/bookmarks/batch-delete", "POST", {
+        ids: [...checked],
+      });
+      applyDeletion(result);
       setDeleteConfirm(false);
       setChecked(new Set());
-      await load();
       setNotice("已删除所选书签并清理空分类");
     } catch (e) {
       message(e);
@@ -1224,9 +1287,7 @@ function App() {
             if (!busy) setDeleteConfirm(false);
           }}
         >
-          <p>
-            删除选中的 {checked.size} 个书签？因此变空的分类及上级分类也会删除。
-          </p>
+          <p>是否确认删除？</p>
           <div className="modal-actions">
             <span />
             <button
@@ -1268,9 +1329,7 @@ function App() {
             modal.value
               ? () => {
                   if (confirm("删除这个分类？"))
-                    void perform(() =>
-                      api("/categories/" + modal.value!.id, "DELETE"),
-                    );
+                    void deleteCategory(modal.value!.id);
                 }
               : undefined
           }
@@ -1297,12 +1356,8 @@ function App() {
           onDelete={
             modal.value
               ? () => {
-                  if (
-                    confirm("删除这个书签？因此变空的分类及上级分类也会删除。")
-                  )
-                    void perform(() =>
-                      api("/bookmarks/" + modal.value!.id, "DELETE"),
-                    );
+                  if (confirm("是否确认删除？"))
+                    void deleteBookmark(modal.value!.id);
                 }
               : undefined
           }

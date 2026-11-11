@@ -17,41 +17,48 @@ func (a *App) batchDeleteBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !check(w, a.deleteBookmarks(v.IDs)) {
+	result, err := a.deleteBookmarks(v.IDs)
+	if !check(w, err) {
 		return
 	}
-	send(w, map[string]bool{"ok": true})
+	send(w, result)
+}
+
+type bookmarkDeletion struct {
+	BookmarkIDs []string `json:"bookmark_ids"`
+	CategoryIDs []string `json:"category_ids"`
 }
 
 // Only prune folders affected by this deletion, leaving independently created
 // empty folders untouched. Bookmark deletion and ancestor pruning are atomic.
 // Icon files retain the existing single-delete behavior; they may be shared.
-func (a *App) deleteBookmarks(ids []string) error {
+func (a *App) deleteBookmarks(ids []string) (bookmarkDeletion, error) {
+	result := bookmarkDeletion{BookmarkIDs: ids, CategoryIDs: []string{}}
 	if len(ids) == 0 || len(ids) > 10000 {
-		return errors.New("请选择 1 至 10000 个书签")
+		return bookmarkDeletion{}, errors.New("请选择 1 至 10000 个书签")
 	}
 	tx, err := a.db.Begin()
 	if err != nil {
-		return err
+		return bookmarkDeletion{}, err
 	}
 	defer tx.Rollback()
 	seen := make(map[string]bool)
 	folders := make(map[string]bool)
 	for _, id := range ids {
 		if id == "" || seen[id] {
-			return errors.New("书签列表无效")
+			return bookmarkDeletion{}, errors.New("书签列表无效")
 		}
 		seen[id] = true
 		var folder string
 		if err := tx.QueryRow("SELECT category_id FROM bookmarks WHERE id=?", id).Scan(&folder); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errBookmarkMissing
+				return bookmarkDeletion{}, errBookmarkMissing
 			}
-			return err
+			return bookmarkDeletion{}, err
 		}
 		folders[folder] = true
 		if _, err := tx.Exec("DELETE FROM bookmarks WHERE id=?", id); err != nil {
-			return err
+			return bookmarkDeletion{}, err
 		}
 	}
 	for len(folders) > 0 {
@@ -62,23 +69,29 @@ func (a *App) deleteBookmarks(ids []string) error {
 				if errors.Is(err, sql.ErrNoRows) {
 					continue
 				}
-				return err
+				return bookmarkDeletion{}, err
 			}
-			result, err := tx.Exec(`DELETE FROM categories WHERE id=?
+			deleted, err := tx.Exec(`DELETE FROM categories WHERE id=?
     AND NOT EXISTS (SELECT 1 FROM bookmarks WHERE category_id=?)
     AND NOT EXISTS (SELECT 1 FROM categories WHERE parent_id=?)`, folder, folder, folder)
 			if err != nil {
-				return err
+				return bookmarkDeletion{}, err
 			}
-			n, err := result.RowsAffected()
+			n, err := deleted.RowsAffected()
 			if err != nil {
-				return err
+				return bookmarkDeletion{}, err
 			}
-			if n > 0 && parent != "" {
-				parents[parent] = true
+			if n > 0 {
+				result.CategoryIDs = append(result.CategoryIDs, folder)
+				if parent != "" {
+					parents[parent] = true
+				}
 			}
 		}
 		folders = parents
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return bookmarkDeletion{}, err
+	}
+	return result, nil
 }
