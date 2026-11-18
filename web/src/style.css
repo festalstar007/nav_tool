@@ -472,6 +472,34 @@ button svg {
   height: 100%;
   padding: 0 12px;
 }
+.bookmark-tile.located {
+  border-color: var(--accent);
+  background: #edf6f1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.locate-status {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid #b8cdbf;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 12px #213b2b18;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.locate-status span {
+  color: #61776a;
+}
 .bookmark-link > span:not(.site-fallback) {
   font-size: 12px;
   white-space: nowrap;

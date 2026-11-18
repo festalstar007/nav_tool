@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 import { bookmarkCollision, insertAfter } from "./bookmark-drag";
+import { useBookmarkLocate } from "./bookmark-locate";
 
 type Category = {
   id: string;
@@ -417,6 +418,7 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [renderLimit, setRenderLimit] = useState(80);
   const moreRef = useRef<HTMLButtonElement>(null);
+  const bookmarkLinks = useRef(new Map<string, HTMLAnchorElement>());
   // Count each bookmark once along its ancestor chain, rather than rebuilding
   // every category subtree separately for every bookmark on every render.
   const categoryCounts = useMemo(() => {
@@ -643,6 +645,28 @@ function App() {
   const orderedVisible = flatCategories.flatMap((c) =>
     ordered(visible.filter((b) => b.category_id === c.id)),
   );
+  const locate = useBookmarkLocate(
+    orderedVisible,
+    !!auth?.authenticated &&
+      !loading &&
+      !edit &&
+      !modal &&
+      !deleteConfirm &&
+      !sideOpen,
+    JSON.stringify([selected, query]),
+    (id) => bookmarkLinks.current.get(id)?.click(),
+  );
+  useEffect(() => {
+    if (!locate.activeId) return;
+    const position = orderedVisible.findIndex((b) => b.id === locate.activeId);
+    if (position >= renderLimit) {
+      setRenderLimit((limit) => Math.max(limit, position + 1));
+      return;
+    }
+    bookmarkLinks.current
+      .get(locate.activeId)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [locate.activeId, renderLimit]);
   const displayed = edit
     ? orderedVisible
     : orderedVisible.slice(0, renderLimit);
@@ -1093,6 +1117,15 @@ function App() {
               </div>
             </div>
           )}
+          {locate.prefix && (
+            <div className="locate-status" role="status">
+              定位：<strong>{locate.prefix}</strong>
+              <span>{locate.count ? `${locate.count} 个匹配` : "无匹配"}</span>
+              <span>
+                {locate.count > 0 && "↑ ↓ 切换 · 回车打开 · "}Esc 取消
+              </span>
+            </div>
+          )}
           {loading ? (
             <div className="empty-state">
               <LoaderCircle className="spin" size={24} />
@@ -1194,7 +1227,12 @@ function App() {
                               }
                             >
                               {(handle) => (
-                                <div className="bookmark-tile">
+                                <div
+                                  className={
+                                    "bookmark-tile" +
+                                    (locate.activeId === b.id ? " located" : "")
+                                  }
+                                >
                                   {handle}
                                   {batch && (
                                     <input
@@ -1207,6 +1245,14 @@ function App() {
                                     />
                                   )}
                                   <a
+                                    ref={(element) => {
+                                      if (element)
+                                        bookmarkLinks.current.set(
+                                          b.id,
+                                          element,
+                                        );
+                                      else bookmarkLinks.current.delete(b.id);
+                                    }}
                                     className="bookmark-link"
                                     href={b.url}
                                     target="_blank"
