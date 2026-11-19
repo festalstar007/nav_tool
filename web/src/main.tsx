@@ -437,10 +437,16 @@ function App() {
   }, [data.categories, data.bookmarks]);
   const message = (e: unknown) =>
     setNotice(e instanceof Error ? e.message : String(e));
-  async function load() {
+  async function load(useDefaultCategory = false) {
     const d = await api<Data>("/data");
     setData(d);
-    setSelected((id) => (d.categories.some((c) => c.id === id) ? id : ""));
+    setSelected((id) =>
+      useDefaultCategory
+        ? d.categories.find((c) => c.name === "常用网址")?.id || ""
+        : d.categories.some((c) => c.id === id)
+          ? id
+          : "",
+    );
     return d;
   }
   useEffect(() => {
@@ -458,7 +464,7 @@ function App() {
   useEffect(() => {
     if (auth?.authenticated) {
       setLoading(true);
-      load()
+      load(true)
         .catch(message)
         .finally(() => setLoading(false));
     }
